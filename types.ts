@@ -1,5 +1,3 @@
-import { Chat } from '@google/genai';
-
 export enum SolutionStatus {
   SOLVED = 'solved',
   UNSOLVED = 'unsolved',
@@ -29,8 +27,6 @@ export interface ChatMessage {
   role: ChatRole;
   text: string;
 }
-
-export type AppChatSession = Chat;
 
 export type SolveInput = string | { 
   image: { 

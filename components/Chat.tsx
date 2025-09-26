@@ -1,18 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChatMessage, ChatRole, AppChatSession } from '../types';
+import { ChatMessage, ChatRole } from '../types';
 import SendIcon from './icons/SendIcon';
 import LoadingSpinner from './icons/LoadingSpinner';
 import { useLanguage } from '../hooks/useLanguage';
 import NewChatIcon from './icons/NewChatIcon';
 import LatexRenderer from './LatexRenderer';
+import { streamChatResponse } from '../services/geminiService';
 
 interface ChatProps {
-  chatSession: AppChatSession | null;
   isEnabled: boolean;
   onNewChat: () => void;
 }
 
-const Chat: React.FC<ChatProps> = ({ chatSession, isEnabled, onNewChat }) => {
+const Chat: React.FC<ChatProps> = ({ isEnabled, onNewChat }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -25,36 +25,60 @@ const Chat: React.FC<ChatProps> = ({ chatSession, isEnabled, onNewChat }) => {
 
   useEffect(scrollToBottom, [messages]);
   
-  // Clear chat when a new session starts
-  useEffect(() => {
-    if (chatSession) {
-        setMessages([]);
-    }
-  }, [chatSession])
+  // Clear chat when new chat button is used
+  const handleNewChat = () => {
+    setMessages([]);
+    onNewChat();
+  }
 
 
   const handleSend = async () => {
-    if (!input.trim() || !chatSession || isStreaming) return;
+    if (!input.trim() || isStreaming) return;
 
     const userMessage: ChatMessage = { role: ChatRole.USER, text: input };
-    setMessages(prev => [...prev, userMessage]);
+    const currentMessages = [...messages, userMessage];
+    setMessages(currentMessages);
     setInput('');
     setIsStreaming(true);
 
     try {
-      const stream = await chatSession.sendMessageStream({ message: input });
+      const stream = await streamChatResponse(currentMessages, input, language);
+      if (!stream) throw new Error("Could not get stream.");
+      
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
       let modelResponseText = '';
       
       const modelMessage: ChatMessage = { role: ChatRole.MODEL, text: '' };
       setMessages(prev => [...prev, modelMessage]);
 
-      for await (const chunk of stream) {
-        modelResponseText += chunk.text;
-        setMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1].text = modelResponseText;
-            return newMessages;
-        });
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+            if (line.trim() === '') continue;
+            try {
+                const chunk = JSON.parse(line);
+                if (chunk.text) {
+                    modelResponseText += chunk.text;
+                    setMessages(prev => {
+                        const newMessages = [...prev];
+                        if (newMessages.length > 0) {
+                            newMessages[newMessages.length - 1].text = modelResponseText;
+                        }
+                        return newMessages;
+                    });
+                }
+            } catch (e) {
+                console.error("Error parsing JSON chunk from stream:", line, e);
+            }
+        }
       }
 
     } catch (error) {
@@ -80,7 +104,7 @@ const Chat: React.FC<ChatProps> = ({ chatSession, isEnabled, onNewChat }) => {
           {t('tutorTitle')}
         </h2>
         <button 
-          onClick={onNewChat}
+          onClick={handleNewChat}
           className="text-gray-400 hover:text-blue-400 transition-colors p-1 rounded-md"
           aria-label={t('newChat')}
           title={t('newChat')}
@@ -91,7 +115,7 @@ const Chat: React.FC<ChatProps> = ({ chatSession, isEnabled, onNewChat }) => {
       <div className="flex-grow p-4 overflow-y-auto">
         {messages.length === 0 ? (
           <div className="flex items-center justify-center h-full text-gray-500">
-            <p>{t('followUpPlaceholder')}</p>
+            <p>{isEnabled ? t('followUpPlaceholder') : t('disabledChatPlaceholder')}</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -102,13 +126,13 @@ const Chat: React.FC<ChatProps> = ({ chatSession, isEnabled, onNewChat }) => {
                 </div>
               </div>
             ))}
-             {isStreaming && messages[messages.length-1]?.role === ChatRole.USER && (
-               <div className="flex justify-start">
-                  <div className="max-w-xs md:max-w-md lg:max-w-lg px-4 py-2 rounded-lg bg-gray-700 text-gray-200">
-                    <LoadingSpinner className="w-5 h-5"/>
-                  </div>
-                </div>
-              )}
+             {isStreaming && messages[messages.length - 1]?.role === ChatRole.MODEL && (
+                 <div className="flex justify-start">
+                     <div className="max-w-xs md:max-w-md lg:max-w-lg px-4 py-2 rounded-lg bg-gray-700 text-gray-200">
+                        <LoadingSpinner className="w-5 h-5"/>
+                     </div>
+                 </div>
+             )}
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -122,11 +146,11 @@ const Chat: React.FC<ChatProps> = ({ chatSession, isEnabled, onNewChat }) => {
             onKeyDown={handleKeyPress}
             placeholder={t('askAQuestion')}
             className="w-full bg-transparent p-3 focus:outline-none text-gray-200 placeholder-gray-500"
-            disabled={isStreaming}
+            disabled={!isEnabled || isStreaming}
           />
           <button
             onClick={handleSend}
-            disabled={isStreaming || !input.trim()}
+            disabled={!isEnabled || isStreaming || !input.trim()}
             className="p-3 text-blue-400 hover:text-blue-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors"
           >
             <SendIcon className={`w-6 h-6 ${language === 'ar' ? 'transform -scale-x-100' : ''}`} />

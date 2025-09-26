@@ -3,8 +3,8 @@ import ProblemInput from './components/ProblemInput';
 import SolutionDisplay from './components/SolutionDisplay';
 import Chat from './components/Chat';
 import AboutModal from './components/AboutModal';
-import { solveProblem, createChatSession, generateInitialData } from './services/geminiService';
-import { SolutionResponse, AppChatSession, SolveInput, HistoryItem, ExampleProblem } from './types';
+import { solveProblem, generateInitialData } from './services/geminiService';
+import { SolutionResponse, SolveInput, HistoryItem, ExampleProblem } from './types';
 import { useLanguage } from './hooks/useLanguage';
 import { useHistory } from './hooks/useHistory';
 import HistoryPanel from './components/HistoryPanel';
@@ -18,7 +18,6 @@ function App() {
   const [currentProblem, setCurrentProblem] = useState<SolveInput | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [chatSession, setChatSession] = useState<AppChatSession | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [exampleProblems, setExampleProblems] = useState<ExampleProblem[]>([]);
@@ -68,7 +67,7 @@ function App() {
     }
   }, [setLanguage]);
 
-  // Effect to fetch dynamic data and create chat session when language changes
+  // Effect to fetch dynamic data when language changes
   useEffect(() => {
     const fetchInitialData = async () => {
         setIsInitialDataLoading(true);
@@ -84,8 +83,6 @@ function App() {
     } else {
         setIsInitialDataLoading(false); // Data is already loaded from URL
     }
-    
-    setChatSession(createChatSession(language));
   }, [language, solution]);
 
   const handleSolve = useCallback(async (problem: SolveInput) => {
@@ -98,8 +95,6 @@ function App() {
       const result = await solveProblem(problem, language);
       setSolution(result);
       addHistoryItem(problem, result);
-      const newChatSession = createChatSession(language);
-      setChatSession(newChatSession);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unknown error occurred.');
     } finally {
@@ -111,23 +106,22 @@ function App() {
     setSolution(null);
     setError(null);
     setCurrentProblem(null);
-    setChatSession(createChatSession(language));
     setIsLoading(false);
-  }, [language]);
+  }, []);
 
   const handleLoadFromHistory = useCallback((item: HistoryItem) => {
     setIsLoading(true);
     setError(null);
     setSolution(item.solution);
     setCurrentProblem(item.problem);
-    setChatSession(createChatSession(language));
     setIsHistoryOpen(false);
     setTimeout(() => setIsLoading(false), 200);
-  }, [language]);
+  }, []);
   
   const handleNewChat = useCallback(() => {
-    setChatSession(createChatSession(language));
-  }, [language]);
+    // This is now handled inside Chat.tsx, but we can keep the prop for potential future use
+    // or to trigger effects here if needed.
+  }, []);
 
   const handleClearHistory = useCallback(() => {
     clearHistory();
@@ -172,7 +166,7 @@ function App() {
             <SolutionDisplay solution={solution} problem={currentProblem} isLoading={isLoading} error={error} />
           </div>
           <div className="mt-8 lg:mt-0 h-[500px] lg:h-auto">
-             <Chat chatSession={chatSession} isEnabled={!!solution} onNewChat={handleNewChat} />
+             <Chat isEnabled={!!solution} onNewChat={handleNewChat} />
           </div>
         </main>
       </div>
